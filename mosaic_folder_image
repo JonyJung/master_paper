@@ -1,0 +1,73 @@
+import os
+import numpy as np
+from astropy.io import fits
+from astropy.wcs import WCS
+from reproject import reproject_interp
+from reproject.mosaicking import find_optimal_celestial_wcs, reproject_and_coadd
+import re
+
+# ================================
+# 1. Cutout 폴더 경로 설정
+# ================================
+cutout_dir = "8stack_cutting_inner"
+
+# 좌표 추출 함수 정의
+def extract_ra_dec(filename):
+    # 예: '4stack_f775w_53.171079_-27.811793.fits'
+    match = re.search(r'_([\d.]+)_(-?[\d.]+)\.fits$', filename)
+    if match:
+        ra = float(match.group(1))
+        dec = float(match.group(2))
+        return ra, dec
+    else:
+        raise ValueError(f"파일명에서 RA/Dec를 추출할 수 없습니다: {filename}")
+
+# 파일 목록 불러오기 및 정렬
+fits_files = [f for f in os.listdir(cutout_dir) if f.endswith('.fits')]
+fits_files_sorted = sorted(fits_files, key=lambda f: extract_ra_dec(f))  # RA → Dec 순 정렬
+cutout_files = [os.path.join(cutout_dir, f) for f in fits_files_sorted]
+
+print(f"총 {len(cutout_files)}개의 cutout 파일이 감지되었으며, RA/Dec 기준으로 정렬되었습니다.\n")
+
+# ================================
+# 2. 모든 cutout FITS 불러오기
+# ================================
+input_hdus = []
+
+for file in cutout_files:
+    hdul = fits.open(file)
+    data = hdul[0].data
+    header = hdul[0].header
+    wcs = WCS(header)
+    input_hdus.append((data, wcs))
+    hdul.close()
+
+print(f"모든 cutout 파일 로드 완료.\n")
+
+# ================================
+# 3. 최적의 WCS와 output shape 계산
+# ================================
+mosaic_wcs, mosaic_shape = find_optimal_celestial_wcs(input_hdus)
+
+print(f"모자이크 최종 shape: {mosaic_shape}")
+print(f"모자이크 WCS 정보:\n{mosaic_wcs}")
+
+# ================================
+# 4. Reproject + Mosaic (coadd)
+# ================================
+mosaic_array, footprint = reproject_and_coadd(
+    input_hdus,
+    output_projection=mosaic_wcs,
+    shape_out=mosaic_shape,
+    reproject_function=reproject_interp,
+    match_background=False
+)
+
+# ================================
+# 5. 결과 저장
+# ================================
+output_filename = "8stack_test_mosaic_image.fits"
+hdu = fits.PrimaryHDU(mosaic_array, header=mosaic_wcs.to_header())
+hdu.writeto(output_filename, overwrite=True)
+
+print(f"\n✅ 모자이크 결과가 '{output_filename}' 파일로 저장되었습니다.")
