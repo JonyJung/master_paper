@@ -1,0 +1,46 @@
+# -----------------------------
+# 설정
+# -----------------------------
+
+input_fits = '13_hlsp_udf_hst_acs-wfc_all_f775w_v1_drz_normalizing.fits'
+output_dir = 'hudf_paper_image2'
+os.makedirs(output_dir, exist_ok=True)
+
+# 중심 좌표 목록 (여기에 원하는 RA/DEC 좌표들을 추가하세요)
+coords_list = [
+        # 균일하게
+        (53.146954, -27.786199),
+        (53.166257, -27.816061),
+        (53.185531, -27.777287)
+]
+
+cutout_size = (512, 512)
+
+# -----------------------------
+# 이미지 및 WCS 로드
+# -----------------------------
+
+hdu = fits.open(input_fits)
+data = hdu[0].data
+header = hdu[0].header
+wcs = WCS(header)
+
+# -----------------------------
+# Cutout 수행 및 저장
+# -----------------------------
+
+for ra_deg, dec_deg in coords_list:
+    position = SkyCoord(ra_deg, dec_deg, unit='deg')
+    cutout = Cutout2D(data, position, cutout_size, wcs=wcs, mode='trim')
+
+    # 기존 헤더 유지하며 WCS 정보만 업데이트
+    new_header = header.copy()
+    new_header.update(cutout.wcs.to_header())
+
+    # 출력 파일명
+    filename = f'hudf_uniform_area_cutout_{ra_deg:.6f}_{dec_deg:.6f}_512x512.fits'
+    output_path = os.path.join(output_dir, filename)
+
+    # 저장
+    fits.writeto(output_path, cutout.data, header=new_header, overwrite=True)
+    print(f"✔ 저장 완료: {output_path}")
