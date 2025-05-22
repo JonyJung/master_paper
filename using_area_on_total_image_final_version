@@ -1,0 +1,206 @@
+import os
+import re
+import numpy as np
+import matplotlib.pyplot as plt
+from astropy.io import fits
+from astropy.wcs import WCS
+from astropy.visualization import ZScaleInterval
+from astropy.coordinates import Angle
+import astropy.units as u
+
+# -----------------------------
+# 1. 경로 및 파일 목록 설정
+# -----------------------------
+
+original_image_path = '72_hlsp_udf_hst_acs-wfc_all_f775w_v1_drz.fits'
+cutout_dir = '72_level5_cut'
+
+# cutout 파일명에서 좌표 추출용 정규표현식
+pattern = re.compile(r'_cutout_([0-9.]+)_(-?[0-9.]+)_512-x-512_cut\.fits')
+
+# cutout 파일 정렬
+cutout_files = sorted([f for f in os.listdir(cutout_dir) if f.endswith('.fits')])
+
+# Train/Test 분할
+train_cutout_files = cutout_files[:300]
+test_cutout_files = cutout_files[300:]
+
+# -----------------------------
+# 2. Train/Test 좌표 추출
+# -----------------------------
+
+ra_train_list, dec_train_list = [], []
+ra_test_list, dec_test_list = [], []
+
+for filename in train_cutout_files:
+    match = pattern.search(filename)
+    if match:
+        ra = float(match.group(1))
+        dec = float(match.group(2))
+        ra_train_list.append(ra)
+        dec_train_list.append(dec)
+    else:
+        print(f"파일명에서 좌표 추출 실패: {filename}")
+
+for filename in test_cutout_files:
+    match = pattern.search(filename)
+    if match:
+        ra = float(match.group(1))
+        dec = float(match.group(2))
+        ra_test_list.append(ra)
+        dec_test_list.append(dec)
+    else:
+        print(f"파일명에서 좌표 추출 실패: {filename}")
+
+ra_train_list = np.array(ra_train_list)
+dec_train_list = np.array(dec_train_list)
+ra_test_list = np.array(ra_test_list)
+dec_test_list = np.array(dec_test_list)
+
+print(f"Train set 좌표: {len(ra_train_list)}개, Test set 좌표: {len(ra_test_list)}개")
+
+# -----------------------------
+# 3. 이미지 불러오기 및 WCS 변환
+# -----------------------------
+
+hdu = fits.open(original_image_path)
+image = hdu[0].data
+wcs = WCS(hdu[0].header)
+
+x_train_pix, y_train_pix = wcs.world_to_pixel_values(ra_train_list, dec_train_list)
+x_test_pix, y_test_pix = wcs.world_to_pixel_values(ra_test_list, dec_test_list)
+
+# -----------------------------
+# 4. zscale 조정
+# -----------------------------
+
+interval = ZScaleInterval()
+vmin, vmax = interval.get_limits(image)
+
+# -----------------------------
+# 5. Train-Test 경계선 계산
+# -----------------------------
+
+ra_boundary = [ra_train_list[-1], ra_test_list[0]]
+dec_boundary = [dec_train_list[-1], dec_test_list[0]]
+x_boundary, y_boundary = wcs.world_to_pixel_values(ra_boundary, dec_boundary)
+
+y_min, y_max = 0, image.shape[0] - 1
+x_min = x_boundary[0] + (y_min - y_boundary[0]) * (x_boundary[1] - x_boundary[0]) / (y_boundary[1] - y_boundary[0])
+x_max = x_boundary[0] + (y_max - y_boundary[0]) * (x_boundary[1] - x_boundary[0]) / (y_boundary[1] - y_boundary[0])
+
+# -----------------------------
+# 6. 마름모 정의
+# -----------------------------
+
+lines = {
+    'red': (0.9, 5000),
+    'orange': (-1.1, 16000),
+    'green': (0.9, -4000),
+    'yellow': (-1.1, 6000)
+}
+
+def intersection(line1, line2):
+    a1, b1 = line1
+    a2, b2 = line2
+    if a1 == a2:
+        raise ValueError("평행선은 교점 없음")
+    x = (b2 - b1) / (a1 - a2)
+    y = a1 * x + b1
+    return x, y
+
+# 마름모 꼭짓점 계산
+red_orange = intersection(lines['red'], lines['orange'])
+orange_green = intersection(lines['orange'], lines['green'])
+green_yellow = intersection(lines['green'], lines['yellow'])
+yellow_red = intersection(lines['yellow'], lines['red'])
+
+corners_pix = np.array([
+    red_orange,
+    orange_green,
+    green_yellow,
+    yellow_red
+])
+
+# -----------------------------
+# 2. 영역 좌표 설정
+# -----------------------------
+# 각각 중심 좌표 리스트
+right_dark_coords = [
+    (53.180716, -27.790456),
+    (53.184914, -27.785654),
+    (53.190367, -27.798985)
+]
+
+left_bright_coords = [
+    (53.151774, -27.773348),
+    (53.171877, -27.814491),
+    (53.195182, -27.786183)
+]
+
+uniform_coords = [
+    (53.146954, -27.786199),
+    (53.166257, -27.816061),
+    (53.185531, -27.777287)
+]
+
+# -----------------------------
+# 7. 시각화
+# -----------------------------
+
+fig = plt.figure(figsize=(12, 12))
+ax = plt.subplot(projection=wcs)
+im = ax.imshow(image, origin='lower', cmap='gray_r', vmin=vmin, vmax=vmax)
+
+# 경계선 (빨간색)
+ax.plot([x_min, x_max], [y_min, y_max], color='red', linestyle='-', label='Train-Test Boundary')
+
+# 마름모 (파란색 점선)
+corners_closed = np.vstack([corners_pix, corners_pix[0]])  # 꼭짓점 순환
+ax.plot(corners_closed[:, 0], corners_closed[:, 1], color='blue', linestyle='-', linewidth=2, label='Edge Boundary')
+
+# zscale
+interval = ZScaleInterval()
+vmin, vmax = interval.get_limits(image)
+ax.imshow(image, origin='lower', cmap='gray_r', vmin=vmin, vmax=vmax)
+
+# 512 x 512 박스 크기 (픽셀 단위)
+box_size = 512
+half_size = box_size // 2
+
+# 중심 좌표를 WCS → 픽셀 좌표로 변환 후 박스 그리기
+def draw_boxes(coord_list, color, label):
+    for i, (ra, dec) in enumerate(coord_list):
+        skycoord = SkyCoord(ra=ra*u.deg, dec=dec*u.deg)
+        x, y = wcs.world_to_pixel(skycoord)
+        rect = Rectangle((x - half_size, y - half_size), box_size, box_size,
+                         linewidth=1.5, edgecolor=color, facecolor='none')
+        ax.add_patch(rect)
+    # 범례용 박스 하나 추가
+    ax.plot([], [], color=color, label=label)
+
+draw_boxes(right_dark_coords, 'cyan', 'Bright Area')
+draw_boxes(left_bright_coords, 'magenta', 'Faint Area')
+draw_boxes(uniform_coords, 'lime', 'Uniform Area')
+
+
+# 좌표축 설정
+ra = ax.coords['ra']
+dec = ax.coords['dec']
+ra.set_ticks(spacing=0.015 * u.deg)
+dec.set_ticks(spacing=0.015 * u.deg)
+ra.set_major_formatter('hh:mm:ss')
+dec.set_major_formatter('dd:mm:ss')
+ra.set_ticklabel(size=15)
+dec.set_ticklabel(size=15)
+
+# 라벨
+ax.set_xlabel('Right Ascension (J2000)', fontsize=14)
+ax.set_ylabel('Declination (J2000)', fontsize=14)
+
+# 범례
+ax.legend()
+
+# 출력
+plt.tight_layout()
+plt.show()
