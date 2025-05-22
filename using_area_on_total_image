@@ -1,0 +1,88 @@
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+from astropy.io import fits
+from astropy.wcs import WCS
+from astropy.visualization import ZScaleInterval
+from astropy.coordinates import SkyCoord
+import astropy.units as u
+from matplotlib.patches import Rectangle
+
+# -----------------------------
+# 1. 기본 이미지와 WCS 로드
+# -----------------------------
+image_path = '72_hlsp_udf_hst_acs-wfc_all_f775w_v1_drz.fits'
+hdu = fits.open(image_path)
+image = hdu[0].data
+wcs = WCS(hdu[0].header)
+
+# -----------------------------
+# 2. 영역 좌표 설정
+# -----------------------------
+# 각각 중심 좌표 리스트
+right_dark_coords = [
+    (53.180716, -27.790456),
+    (53.184914, -27.785654),
+    (53.190367, -27.798985)
+]
+
+left_bright_coords = [
+    (53.151774, -27.773348),
+    (53.171877, -27.814491),
+    (53.195182, -27.786183)
+]
+
+uniform_coords = [
+    (53.146954, -27.786199),
+    (53.166257, -27.816061),
+    (53.185531, -27.777287)
+]
+
+# -----------------------------
+# 3. 시각화
+# -----------------------------
+fig = plt.figure(figsize=(12, 12))
+ax = plt.subplot(projection=wcs)
+
+# zscale
+interval = ZScaleInterval()
+vmin, vmax = interval.get_limits(image)
+ax.imshow(image, origin='lower', cmap='gray_r', vmin=vmin, vmax=vmax)
+
+# 512 x 512 박스 크기 (픽셀 단위)
+box_size = 512
+half_size = box_size // 2
+
+# 중심 좌표를 WCS → 픽셀 좌표로 변환 후 박스 그리기
+def draw_boxes(coord_list, color, label):
+    for i, (ra, dec) in enumerate(coord_list):
+        skycoord = SkyCoord(ra=ra*u.deg, dec=dec*u.deg)
+        x, y = wcs.world_to_pixel(skycoord)
+        rect = Rectangle((x - half_size, y - half_size), box_size, box_size,
+                         linewidth=1.5, edgecolor=color, facecolor='none')
+        ax.add_patch(rect)
+    # 범례용 박스 하나 추가
+    ax.plot([], [], color=color, label=label)
+
+draw_boxes(right_dark_coords, 'cyan', 'Bright Area')
+draw_boxes(left_bright_coords, 'magenta', 'Faint Area')
+draw_boxes(uniform_coords, 'lime', 'Uniform Area')
+
+# 좌표축 설정
+ra = ax.coords['ra']
+dec = ax.coords['dec']
+ra.set_ticks(spacing=0.015 * u.deg)
+dec.set_ticks(spacing=0.015 * u.deg)
+ra.set_major_formatter('hh:mm:ss')
+dec.set_major_formatter('dd:mm:ss')
+ra.set_ticklabel(size=15)
+dec.set_ticklabel(size=15)
+
+# 라벨
+ax.set_xlabel('Right Ascension (J2000)', fontsize=14)
+ax.set_ylabel('Declination (J2000)', fontsize=14)
+
+# 범례 및 출력
+ax.legend(loc='upper right')
+plt.tight_layout()
+plt.show()
