@@ -1,0 +1,32 @@
+import os
+import numpy as np
+from astropy.io import fits
+
+# 원본 폴더와 새로운 저장 폴더
+input_dir = '4stack_paper_image'
+output_dir = '4stack_paper_image(512,512,1)'
+os.makedirs(output_dir, exist_ok=True)
+
+# 파일 리스트 불러오기
+fits_files = [f for f in os.listdir(input_dir) if f.endswith('.fits')]
+
+for filename in fits_files:
+    input_path = os.path.join(input_dir, filename)
+    output_path = os.path.join(output_dir, filename)
+
+    # 이미지 불러오기
+    with fits.open(input_path) as hdul:
+        data = hdul[0].data
+        header = hdul[0].header
+
+        # shape 확인
+        if data.ndim != 2 or data.shape != (512, 512):
+            print(f"⚠️ 무시됨 (2D 이미지 아님): {filename}")
+            continue
+
+        # (512, 512, 1)로 reshape
+        reshaped_data = data[:, :, np.newaxis]
+
+        # 저장
+        fits.writeto(output_path, reshaped_data, header=header, overwrite=True)
+        print(f"✔ 저장 완료: {output_path}")
