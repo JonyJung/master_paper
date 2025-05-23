@@ -1,0 +1,32 @@
+import os
+from astropy.io import fits
+import numpy as np
+
+# 입력 및 출력 디렉토리
+input_folder = 'mosaic_area1(512,512,1)'
+output_folder = 'mosaic_area1_(512,512)'
+os.makedirs(output_folder, exist_ok=True)
+
+# 폴더 내의 모든 .fits 파일 순회
+for filename in os.listdir(input_folder):
+    if filename.endswith('.fits'):
+        input_path = os.path.join(input_folder, filename)
+
+        # FITS 파일 열기
+        with fits.open(input_path) as hdul:
+            data = hdul[0].data  # 이미지 데이터
+            header = hdul[0].header  # 헤더
+
+            # (512, 512, 1) 형태이면 reshape
+            if data is not None and data.ndim == 3 and data.shape[-1] == 1:
+                reshaped_data = data[:, :, 0]  # (512, 512)로 변환
+            else:
+                print(f"Skipping (not 3D with shape (*, *, 1)): {filename}")
+                continue
+
+            # 새 파일 저장
+            output_path = os.path.join(output_folder, filename)
+            hdu = fits.PrimaryHDU(reshaped_data, header=header)
+            hdu.writeto(output_path, overwrite=True)
+
+print("변환 완료되었습니다.")
